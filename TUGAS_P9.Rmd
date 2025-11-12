@@ -1,0 +1,245 @@
+---
+title: "K-Means Clustering"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-11-11"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    css: "D:/style.css"
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Studi Kasus
+
+Permasalahan stunting di Indonesia masih menjadi isu strategis nasional, karena berkaitan langsung dengan kualitas sumber daya manusia di masa depan. Beberapa faktor penting yang memengaruhi status gizi balita antara lain pemberian ASI eksklusif dan cakupan imunisasi lengkap.\
+
+ASI eksklusif memberikan asupan nutrisi optimal bagi bayi hingga usia 6 bulan, sementara imunisasi berperan dalam mencegah penyakit infeksi yang dapat berimplikasi pada kekurangan gizi kronis.\
+
+Dalam upaya memahami pola perilaku dan kondisi kesehatan anak di berbagai provinsi, digunakan metode K-Means Clustering guna mengelompokkan 38 provinsi di Indonesia berdasarkan:
+
+1.  Prevalensi balita stunting (%)
+
+2.  Persentase pemberian ASI eksklusif (%)
+
+3.  Persentase imunisasi lengkap (%)
+
+Analisis ini bertujuan untuk:
+
+-   Mengelompokkan provinsi di Indonesia menjadi beberapa klaster dengan karakteristik yang mirip berdasarkan tiga indikator gizi dan kesehatan anak.
+
+-   Mengidentifikasi pola dan tingkat pencapaian kesehatan anak di tiap kelompok provinsi.
+
+-   Memberikan informasi awal bagi pengambil kebijakan untuk menentukan prioritas intervensi.
+
+# 1. Penyiapan Dataset
+
+Sumber data : BPS\
+Deskripsi :\
+Dataset berisi prevalensi balita stunting, persentasi pemberian imunisasi lengkap pada anak 12-23 bulan dan persentase pemberian asi eksklusif pada bayi usia kurang dari 6 bulan di 38 provinsi di Indonesia pada tahun 2023.
+
+```{r}
+# Gabung menjadi satu dataset
+library(readxl)
+stunting <- read_xlsx("D:\\DA_PORTO\\EXCEL\\stunting_prov_23.xlsx")
+asi <- read_xlsx("D:\\DA_PORTO\\EXCEL\\asi_prov_23.xlsx")
+imunisasi <- read_xlsx("D:\\DA_PORTO\\EXCEL\\imunisasi_prov_23.xlsx")
+
+library(dplyr)
+df <- stunting %>%
+  inner_join(asi, by = "nama_prov") %>%
+  inner_join(imunisasi, by = "nama_prov")
+```
+
+```{r}
+View(df)
+df
+```
+
+Dalam analisis ini, karena data resmi tahun 2023 tidak tersedia, nilai untuk Papua Tengah, Papua Selatan, Papua Pegunungan, dan Papua Barat Daya diestimasi dari provinsi induknya, yaitu Papua dan Papua Barat.
+
+```{r}
+str(df)
+```
+
+```{r}
+# Cek missing value
+df %>% filter(if_any(everything(), is.na))
+```
+
+Dataset memiliki kolom-kolom dengan format yang tepat dan tidak mengandung missing value maupun duplikat sehingga siap untuk dianalisis.
+
+# 2. Prosedur K-Means Clustering
+
+```{r}
+# Scale data
+df1 <- df[4:6]
+df1_scale <- scale(df1)
+```
+
+```{r}
+head(df1_scale)
+```
+
+Meskipun ketiga variabel memiliki satuan yang sama (persentase), scaling tetap dilakukan karena masing-masing variabel memiliki rentang dan variasi yang berbeda. Scaling (standarisasi z-score) memastikan setiap variabel memberikan kontribusi yang seimbang dalam pembentukan klaster.
+
+```{r}
+library(factoextra)
+fviz_nbclust(df1_scale, kmeans, method = "wss") + labs(title = "Elbow Method")
+```
+
+Metode Elbow (WSS) melihat penurunan *within-cluster sum of squares*, dimana semakin kecil nilainya, maka klaster semakin homogen.
+
+```{r}
+fviz_nbclust(df1_scale, kmeans, method = "silhouette") + labs(title = "Elbow Method")
+```
+
+Metode Silhouette menilai kualitas pemisahan antar klaster.
+
+Walaupun hasil optimal menunjukkan k = 6, pemilihan k = 4 dilakukan dengan pertimbangan:
+
+-   Nilai penurunan WSS mulai stabil setelah 4 klaster.
+
+-   Jumlah 4 klaster lebih mudah diinterpretasikan secara substantif (baik, sedang, kurang, buruk).
+
+-   Terlalu banyak klaster akan membuat hasilnya terlalu spesifik dan sulit dijelaskan secara kebijakan.
+
+```{r}
+set.seed(123)
+for (n in c(5, 10, 20, 50)) {
+  hasil <- kmeans(df1_scale, centers = 4, nstart = n)
+  cat("nstart =", n, " → total withinss:", hasil$tot.withinss, "\n")
+}
+```
+
+`nstart` digunakan agar algoritma K-Means dijalankan beberapa kali dengan posisi awal centroid berbeda, lalu diambil hasil terbaik (minimum *within-cluster variation*).\
+
+Nilai `nstart = 5` sudah cukup untuk dataset kecil seperti ini (38 observasi).
+
+```{r}
+hasil.km <- kmeans(df1_scale, centers = 4, nstart = 5)
+hasil.km
+```
+
+Pemisahan 4 klaster menjelaskan 63,9% variasi data (cukup baik). Adapun interpretasi dari hasil `cluster means` sebagai berikut,
+
+![](images/Screenshot 2025-11-12 090414.png)
+
+# 3. Visualisasi dan Kesimpulan
+
+```{r}
+klaster.km <- hasil.km$cluster
+rownames(df1_scale) <- paste(df$nama_prov)
+fviz_cluster(
+  list(data = df1_scale, cluster = klaster.km),
+  main = "Peta Klaster Provinsi Berdasarkan Stunting, ASI, dan Imunisasi (2023)",
+  labelsize = 8
+)
+```
+
+Selanjutnya akan dibuat *choropleth map* untuk visualisasi tambahan. Langkah pengerjaannya dimulai dari menggabungkan dataset `df1_scale` dengan file shp `LapakGIS_Batas_Provinsi_2024.shp` lalu dibuat plotnya. Namun, pada kolom `KDPPUM` dan `kode_prov` yang dijadikan sebagai key untuk penggabungan dataset memiliki nilai berbeda untuk 6 provinsi hasil pemekaran Papua, sehingga dilakukan penyamaan nilai terlebih dahulu sebelum digabungkan.
+
+```{r}
+library(sf)
+prov.shp <- st_read("D:\\DA_PORTO\\batas prov_lapakgis\\LapakGIS_Batas_Provinsi_2024.shp")
+```
+
+```{r}
+head(prov.shp)
+```
+
+```{r}
+View(st_drop_geometry(prov.shp))
+```
+
+```{r}
+prov.shp <- prov.shp %>%
+  mutate(
+    KDPPUM = case_when(
+      KDPPUM == "91" ~ "94",
+      KDPPUM == "93" ~ "95",
+      KDPPUM == "94" ~ "96",
+      KDPPUM == "95" ~ "97",
+      TRUE ~ KDPPUM
+    )
+  )
+```
+
+```{r}
+prov.shp <- prov.shp %>%
+  mutate(
+    KDPPUM = if_else(KDPPUM == "92" & WADMPR == "Papua Barat", "91", KDPPUM)
+  )
+```
+
+```{r}
+# Gabungkan data klaster ke shapefile
+df1_comp <- prov.shp %>%
+  left_join(
+    df %>%
+      mutate(
+        kode_prov = as.character(kode_prov),
+        cluster = hasil.km$cluster
+      ),
+    by = c("KDPPUM" = "kode_prov")
+  )
+```
+
+```{r}
+# Plot choropleth final
+ggplot(df1_comp) +
+  geom_sf(aes(fill = as.factor(cluster)), color = "grey20", size = 0.1) +
+  scale_fill_manual(
+    values = c(
+      "1" = "#EF2525",  # Klaster 1 - merah
+      "2" = "#15E16E",  # Klaster 2 - hijau
+      "3" = "#EFEB13",  # Klaster 3 - kuning
+      "4" = "#EF8A17"   # Klaster 4 - oranye
+    ),
+    name = "Klaster"
+  ) +
+  labs(
+    title = "Peta Klaster Provinsi Berdasarkan Stunting, ASI, dan Imunisasi",
+    subtitle = "Analisis K-Means dengan 4 Klaster",
+    caption = "Sumber data: BPS (2023)"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),             # hilangkan grid
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5),
+    legend.position = "right",
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.background = element_blank()
+  )
+```
+
+Berdasarkan interpretasi `cluester means`:\
+
+Klaster 1: Kondisi buruk: stunting tinggi, ASI & imunisasi sangat rendah\
+Klaster 2: Kondisi baik: stunting rendah, ASI & imunisasi tinggi\
+Klaster 3: Kurang ASI: stunting sedang, ASI rendah & imunisasi moderat\
+Klaster 4: Kurang Imunisasi: stunting sedang, ASI tinggi & imunisasi rendah\
+
+Berikut informasi provinsi dengan klasternya. 
+
+```{r}
+df1_comp %>%
+  st_drop_geometry() %>% 
+  select(WADMPR, cluster)
+```
+
+Berdasarkan informasi klaster yang didapat, metode intervensi untuk tiap provinsi bisa disesuaikan dengan klasternya seperti berikut ini:\
+
+-   Provinsi yang termasuk Klaster 1 membutuhkan intervensi gizi yang intensif, program penyuluhan ASI eksklusif, serta percepatan cakupan imunisasi lengkap.\
+-   Provinsi dalam Klaster 2 dapat dipertahankan melalui program pemeliharaan dan penguatan keberhasilan.\
+-   Provinsi di Klaster 3 sebaiknya difokuskan pada promosi dan dukungan pemberian ASI, disertai pemantauan stunting dan imunisasi moderat agar risiko stunting tidak meningkat.\
+-   Provinsi di Klaster 4 memerlukan peningkatan layanan imunisasi.\
